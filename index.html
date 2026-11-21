@@ -160,7 +160,7 @@
 <footer>
   <span>原图：<b id="origInfo">未加载</b></span>
   <span>导出：<b id="result">—</b></span>
-  <span style="margin-left:auto">v4 · 粘贴直显 · 图层置顶/置底 · 纯前端本地处理，不上传服务器</span>
+  <span style="margin-left:auto">v5 · 原生加载防读取失败 · 图层置顶/置底 · 纯前端本地处理，不上传服务器</span>
 </footer>
 
 <script>/* ==================== 基础 ==================== */
@@ -224,14 +224,19 @@ function isImgFile(file){
   return /\.(png|jpe?g|webp|gif|bmp|svg|jpg)$/.test(name);
 }
 function loadImageFile(file){
-  if(!isImgFile(file)){ showTip('剪贴板里不是图片，请改用「上传图片」选图片文件'); return; }
+  if(!isImgFile(file)){ showTip('剪贴板里不是图片，请点「上传图片」选图片文件'); return; }
   const url = URL.createObjectURL(file);
-  fabric.Image.fromURL(url, img => {
-    if(!img || !img.width){ showTip('图片读取失败，请改用「上传图片」'); URL.revokeObjectURL(url); return; }
-    applyBgImage(img, Math.round(img.width), Math.round(img.height), file.size);
+  const im = new Image();
+  im.onload = () => {
+    try{
+      const fimg = new fabric.Image(im, { crossOrigin: 'anonymous' });
+      applyBgImage(fimg, Math.round(fimg.width), Math.round(fimg.height), file.size);
+      autoStoreFile(file);
+    }catch(err){ showTip('图片处理失败：' + (err.message || err)); }
     setTimeout(() => URL.revokeObjectURL(url), 3000);
-  }, { crossOrigin: 'anonymous' });
-  autoStoreFile(file);
+  };
+  im.onerror = () => { showTip('这张图读不出来（多半是复制的文件引用，不是位图），请点「上传图片」直接选文件'); URL.revokeObjectURL(url); };
+  im.src = url;
 }
 function fitView(){
   const maxW = stage.clientWidth - 60, maxH = stage.clientHeight - 60;
