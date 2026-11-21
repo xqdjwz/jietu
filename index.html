@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WebP Shot — 高清截图标注 · 极致压缩 WebP 导出</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+<style>
+  :root{
+    --bg:#f4f6f8; --panel:#ffffff; --line:#e2e6ea; --text:#22303c;
+    --muted:#7a8896; --accent:#2563eb; --accent-soft:#e8effd;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    background:var(--bg);color:var(--text);display:flex;flex-direction:column;overflow:hidden}
+  /* 顶栏 */
+  header{display:flex;align-items:center;gap:12px;padding:10px 16px;background:var(--panel);
+    border-bottom:1px solid var(--line);flex-wrap:wrap}
+  header h1{font-size:17px;font-weight:700;margin-right:8px}
+  header h1 span{color:var(--accent)}
+  .btn{border:1px solid var(--line);background:#fff;color:var(--text);padding:7px 13px;border-radius:8px;
+    font-size:14px;cursor:pointer;transition:.15s;user-select:none}
+  .btn:hover{border-color:var(--accent);color:var(--accent)}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn.primary:hover{background:#1d4ed8;color:#fff}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .spacer{flex:1}
+  /* 主体三栏 */
+  .main{flex:1;display:flex;overflow:hidden}
+  .toolbar{width:64px;background:var(--panel);border-right:1px solid var(--line);
+    display:flex;flex-direction:column;align-items:center;padding:10px 0;gap:6px;overflow-y:auto}
+  .tool{width:44px;height:44px;border-radius:10px;border:none;background:transparent;font-size:20px;
+    cursor:pointer;display:flex;align-items:center;justify-content:center}
+  .tool:hover{background:var(--accent-soft)}
+  .tool.active{background:var(--accent-soft);color:var(--accent);outline:1px solid var(--accent)}
+  .divider{width:34px;height:1px;background:var(--line);margin:6px 0}
+  /* 画布区 */
+  .stage{flex:1;overflow:auto;padding:24px;display:flex;align-items:flex-start;justify-content:center}
+  .canvas-wrap{background:repeating-conic-gradient(#e9edf1 0 25%,#f7f9fa 0 50%) 0 0/24px 24px;
+    border-radius:10px;box-shadow:0 2px 14px rgba(0,0,0,.08);max-width:100%}
+  #canvas{display:block}
+  .empty-hint{color:var(--muted);text-align:center;padding:80px 20px;font-size:15px;line-height:2}
+  /* 右侧面板 */
+  .side{width:288px;background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;padding:14px}
+  .side h2{font-size:13px;color:var(--muted);font-weight:600;margin:14px 0 8px;text-transform:uppercase;letter-spacing:.5px}
+  .side h2:first-child{margin-top:0}
+  .row{display:flex;align-items:center;gap:8px;margin:8px 0;font-size:14px}
+  .row label{flex:0 0 74px;color:var(--muted)}
+  .row input[type=number],.row input[type=text],.row select{flex:1;padding:6px 8px;border:1px solid var(--line);
+    border-radius:7px;font-size:14px;min-width:0}
+  .row input[type=color]{width:42px;height:30px;border:1px solid var(--line);border-radius:6px;padding:2px;cursor:pointer}
+  .row input[type=range]{flex:1}
+  .val{flex:0 0 52px;text-align:right;font-variant-numeric:tabular-nums;color:var(--muted)}
+  .check{display:flex;align-items:center;gap:8px;font-size:14px;margin:8px 0;cursor:pointer}
+  .hint{font-size:12px;color:var(--muted);line-height:1.6;margin-top:4px}
+  .panel-box{border:1px solid var(--line);border-radius:10px;padding:10px;margin-top:6px}
+  /* 状态栏 */
+  footer{display:flex;gap:20px;padding:8px 16px;background:var(--panel);border-top:1px solid var(--line);
+    font-size:13px;color:var(--muted);flex-wrap:wrap;align-items:center}
+  footer b{color:var(--text)}
+  #result{color:#16a34a;font-weight:600}
+  @media(max-width:860px){.side{width:240px}.toolbar{width:54px}}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>WebP <span>Shot</span></h1>
+  <button class="btn" id="btnUpload">📁 上传图片</button>
+  <button class="btn" id="btnPaste">📋 粘贴截图</button>
+  <button class="btn" id="btnClear">🗑 清空</button>
+  <div class="spacer"></div>
+  <button class="btn" id="btnUndo">↩ 撤销</button>
+  <button class="btn" id="btnRedo">↪ 重做</button>
+  <button class="btn primary" id="btnExport">⬇ 导出 WebP</button>
+  <input type="file" id="fileInput" accept="image/*" hidden>
+</header>
+
+<div class="main">
+  <!-- 左侧标注工具栏 -->
+  <div class="toolbar">
+    <button class="tool active" data-tool="select" title="选择/移动">🖐</button>
+    <button class="tool" data-tool="rect" title="矩形">▢</button>
+    <button class="tool" data-tool="ellipse" title="椭圆">◯</button>
+    <button class="tool" data-tool="arrow" title="箭头">➤</button>
+    <button class="tool" data-tool="line" title="直线">／</button>
+    <button class="tool" data-tool="pencil" title="画笔">✏️</button>
+    <button class="tool" data-tool="text" title="文字">T</button>
+    <div class="divider"></div>
+    <button class="tool" id="btnDel" title="删除选中">🗑</button>
+  </div>
+
+  <!-- 画布区 -->
+  <div class="stage" id="stage">
+    <div class="empty-hint" id="hint">
+      把系统截图 <b>Ctrl/Cmd + V</b> 直接粘进来，或拖拽 / 点上传<br>
+      支持矩形、箭头、画笔、文字标注，水印后导出极致压缩 WebP
+    </div>
+    <div class="canvas-wrap" id="wrap" hidden>
+      <canvas id="canvas" width="800" height="600"></canvas>
+    </div>
+  </div>
+
+  <!-- 右侧设置面板 -->
+  <div class="side">
+    <h2>标注样式</h2>
+    <div class="row"><label>颜色</label><input type="color" id="penColor" value="#ef4444"></div>
+    <div class="row"><label>粗细</label><input type="range" id="penWidth" min="1" max="30" value="4"><span class="val" id="penWidthV">4</span></div>
+    <div class="row"><label>字号</label><input type="range" id="fontSize" min="12" max="80" value="24"><span class="val" id="fontSizeV">24</span></div>
+
+    <h2>文字水印</h2>
+    <div class="panel-box">
+      <div class="row"><label>内容</label><input type="text" id="wmText" placeholder="你的水印文字"></div>
+      <div class="row"><label>位置</label>
+        <select id="wmPos">
+          <option value="br">右下角</option>
+          <option value="tile">全图平铺</option>
+          <option value="center">居中一次</option>
+        </select>
+      </div>
+      <div class="row"><label>透明度</label><input type="range" id="wmAlpha" min="5" max="100" value="25"><span class="val" id="wmAlphaV">25%</span></div>
+      <div class="row"><label>字号</label><input type="range" id="wmSize" min="12" max="120" value="32"><span class="val" id="wmSizeV">32</span></div>
+      <div class="row"><label>旋转</label><input type="range" id="wmRotate" min="-45" max="45" value="-20"><span class="val" id="wmRotateV">-20°</span></div>
+      <div class="row"><button class="btn" id="btnApplyTextWm" style="flex:1">应用文字水印</button></div>
+    </div>
+
+    <h2>图片水印（Logo）</h2>
+    <div class="panel-box">
+      <div class="row"><button class="btn" id="btnWmImg" style="flex:1">上传 Logo 图片</button></div>
+      <div class="row"><label>透明度</label><input type="range" id="wmImgAlpha" min="5" max="100" value="60"><span class="val" id="wmImgAlphaV">60%</span></div>
+      <div class="hint">上传后拖动摆位、四角缩放；位置满意再导出。</div>
+      <input type="file" id="wmImgInput" accept="image/*" hidden>
+    </div>
+    <button class="btn" id="btnRemoveWm" style="width:100%;margin-top:6px">移除所有水印</button>
+
+    <h2>导出 WebP</h2>
+    <div class="panel-box">
+      <label class="check"><input type="checkbox" id="autoSize" checked> 自动极致压缩（优先压到目标体积）</label>
+      <div class="row" id="targetRow"><label>目标体积</label><input type="number" id="targetKB" value="500" min="10"><span class="val">KB</span></div>
+      <div class="row" id="qualityRow" hidden><label>固定质量</label><input type="range" id="quality" min="50" max="95" value="88"><span class="val" id="qualityV">88</span></div>
+      <div class="hint">自动模式：在不低于 0.5 的前提下，二分搜索满足目标体积的最高画质；勾掉则用固定质量导出。</div>
+    </div>
+  </div>
+</div>
+
+<footer>
+  <span>原图：<b id="origInfo">未加载</b></span>
+  <span>导出：<b id="result">—</b></span>
+  <span style="margin-left:auto">纯前端本地处理，图片不上传服务器</span>
+</footer>
+
+<script>
+/* ==================== 基础 ==================== */
+const canvasEl = document.getElementById('canvas');
+const stage = document.getElementById('stage');
+const wrap = document.getElementById('wrap');
+const hint = document.getElementById('hint');
+const canvas = new fabric.Canvas('canvas', { preserveDrawingBuffer: true, backgroundColor: '#fff' });
+let bgImage = null;
+let history = [], redoStack = [];
+let wmObjects = [];
+let currentTool = 'select';
+
+/* 自定义箭头（线 + 三角箭头） */
+fabric.Arrow = fabric.Line.extend({
+  type: 'arrow',
+  _render(ctx){
+    this.callSuper('_render', ctx);
+    const angle = Math.atan2(this.y2 - this.y1, this.x2 - this.x1);
+    const len = Math.max(14, this.strokeWidth * 4.5);
+    const wid = Math.max(9, this.strokeWidth * 2.6);
+    ctx.save();
+    ctx.translate(this.x2, this.y2);
+    ctx.rotate(angle);
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(-len, -wid / 2);
+    ctx.lineTo(-len, wid / 2);
+    ctx.closePath();
+    ctx.fillStyle = this.stroke;
+    ctx.fill();
+    ctx.restore();
+  }
+});
+
+/* ==================== 历史（撤销/重做） ==================== */
+function snapshot(){
+  history.push(JSON.stringify(canvas.toJSON(['type'])));
+  if(history.length > 60) history.shift();
+  redoStack = [];
+}
+function restore(json){
+  canvas.loadFromJSON(json, () => { canvas.renderAll(); });
+}
+canvas.on('object:added', e => { if(!e.target.__temp) snapshot(); });
+canvas.on('object:modified', () => snapshot());
+document.getElementById('btnUndo').onclick = () => {
+  if(history.length < 2) return;
+  redoStack.push(history.pop());
+  restore(history[history.length - 1]);
+};
+document.getElementById('btnRedo').onclick = () => {
+  const j = redoStack.pop();
+  if(!j) return;
+  history.push(j);
+  restore(j);
+};
+
+/* ==================== 图片载入（保持原始像素 = 不模糊） ==================== */
+let origBytes = 0, origDims = '';
+function loadImageFile(file){
+  if(!file || !file.type.startsWith('image/')) return;
+  origBytes = file.size;
+  const reader = new FileReader();
+  reader.onload = e => {
+    fabric.Image.fromURL(e.target.result, img => {
+      bgImage = img;
+      const w = Math.round(img.width), h = Math.round(img.height);
+      origDims = w + ' × ' + h;
+      canvas.setWidth(w); canvas.setHeight(h);
+      canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas), { originX:'left', originY:'top' });
+      // 适配视图
+      wrap.hidden = false; hint.hidden = true;
+      fitView();
+      history = []; redoStack = [];
+      history.push(JSON.stringify(canvas.toJSON(['type'])));
+      document.getElementById('origInfo').textContent =
+        origDims + ' · ' + (origBytes/1024).toFixed(1) + ' KB';
+    });
+  };
+  reader.readAsDataURL(file);
+}
+function fitView(){
+  const maxW = stage.clientWidth - 60, maxH = stage.clientHeight - 60;
+  const w = canvas.getWidth(), h = canvas.getHeight();
+  const s = Math.min(1, maxW / w, maxH / h);
+  // 内部始终保持原图真实像素（导出不模糊），仅用 zoom 缩放视图
+  wrap.style.zoom = s;
+  wrap.style.width = w + 'px'; wrap.style.height = h + 'px';
+}
+window.addEventListener('resize', fitView);
+
+/* 上传 / 拖拽 / 粘贴 */
+const fileInput = document.getElementById('fileInput');
+document.getElementById('btnUpload').onclick = () => fileInput.click();
+fileInput.onchange = e => loadImageFile(e.target.files[0]);
+document.getElementById('btnPaste').onclick = async () => {
+  try{
+    const items = await navigator.clipboard.read();
+    for(const it of items){
+      const type = it.types.find(t => t.startsWith('image/'));
+      if(type){ loadImageFile(new File([await it.getType(type)], 'paste.png', {type})); return; }
+    }
+    alert('剪贴板里没有图片，先截图再 Ctrl+V');
+  }catch{ alert('请直接在页面上按 Ctrl/Cmd + V 粘贴'); }
+};
+window.addEventListener('paste', e => {
+  const f = e.clipboardData && e.clipboardData.files && e.clipboardData.files[0];
+  if(f) loadImageFile(f);
+});
+stage.addEventListener('dragover', e => { e.preventDefault(); });
+stage.addEventListener('drop', e => {
+  e.preventDefault();
+  const f = e.dataTransfer.files[0];
+  if(f) loadImageFile(f);
+});
+document.getElementById('btnClear').onclick = () => {
+  canvas.clear(); canvas.backgroundColor = '#fff';
+  bgImage = null; wmObjects = [];
+  history = []; redoStack = [];
+  wrap.hidden = true; hint.hidden = false;
+  document.getElementById('origInfo').textContent = '未加载';
+  document.getElementById('result').textContent = '—';
+};
+
+/* ==================== 标注工具 ==================== */
+const tools = document.querySelectorAll('.tool[data-tool]');
+let drew = null;
+function setTool(t){
+  currentTool = t;
+  tools.forEach(b => b.classList.toggle('active', b.dataset.tool === t));
+  canvas.isDrawingMode = (t === 'pencil');
+  canvas.selection = (t === 'select');
+  canvas.defaultCursor = (t === 'select') ? 'default' : 'crosshair';
+  if(t === 'pencil'){
+    canvas.freeDrawingBrush.color = document.getElementById('penColor').value;
+    canvas.freeDrawingBrush.width = +document.getElementById('penWidth').value;
+  }
+}
+tools.forEach(b => b.onclick = () => setTool(b.dataset.tool));
+
+const penColor = document.getElementById('penColor');
+const penWidth = document.getElementById('penWidth');
+penWidth.oninput = () => {
+  document.getElementById('penWidthV').textContent = penWidth.value;
+  if(canvas.isDrawingMode) canvas.freeDrawingBrush.width = +penWidth.value;
+};
+penColor.oninput = () => { if(canvas.isDrawingMode) canvas.freeDrawingBrush.color = penColor.value; };
+document.getElementById('fontSize').oninput = e =>
+  document.getElementById('fontSizeV').textContent = e.target.value;
+
+canvas.on('mouse:down', o => {
+  if(currentTool === 'select' || currentTool === 'pencil') return;
+  const pt = canvas.getScenePoint(o.e);
+  const opts = {
+    left: pt.x, top: pt.y,
+    stroke: penColor.value,
+    strokeWidth: +penWidth.value,
+    fill: currentTool === 'rect' || currentTool === 'ellipse' ? 'rgba(0,0,0,0)' : null,
+    transparentCorners: false
+  };
+  if(currentTool === 'rect') drew = new fabric.Rect({ ...opts, width:1, height:1 });
+  else if(currentTool === 'ellipse') drew = new fabric.Ellipse({ ...opts, rx:1, ry:1 });
+  else if(currentTool === 'line') drew = new fabric.Line([pt.x, pt.y, pt.x, pt.y], opts);
+  else if(currentTool === 'arrow') drew = new fabric.Arrow([pt.x, pt.y, pt.x, pt.y], opts);
+  else if(currentTool === 'text'){
+    const t = new fabric.Textbox('双击编辑文字', {
+      left: pt.x, top: pt.y,
+      fontSize: +document.getElementById('fontSize').value,
+      fill: penColor.value, width: 220
+    });
+    canvas.add(t); canvas.setActiveObject(t);
+    setTool('select');
+    return;
+  }
+  if(drew){ canvas.add(drew); }
+});
+canvas.on('mouse:move', o => {
+  if(!drew) return;
+  const pt = canvas.getScenePoint(o.e);
+  if(currentTool === 'rect' || currentTool === 'ellipse'){
+    const x = Math.min(drew.left, pt.x), y = Math.min(drew.top, pt.y);
+    const w = Math.abs(pt.x - drew.left), h = Math.abs(pt.y - drew.top);
+    drew.set({ left:x, top:y, width:w, height:h, rx: currentTool==='ellipse'?w/2:0, ry: currentTool==='ellipse'?h/2:0 });
+  } else {
+    drew.set({ x2: pt.x, y2: pt.y });
+  }
+  canvas.renderAll();
+});
+canvas.on('mouse:up', () => { if(drew){ canvas.add(drew); drew = null; } });
+
+document.getElementById('btnDel').onclick = () => {
+  const sel = canvas.getActiveObjects();
+  sel.forEach(obj => canvas.remove(obj));
+  canvas.discardActiveObject(); canvas.renderAll();
+};
+window.addEventListener('keydown', e => {
+  if((e.key === 'Delete' || e.key === 'Backspace') && document.activeElement.tagName !== 'INPUT'){
+    const sel = canvas.getActiveObjects();
+    if(sel.length){ sel.forEach(o => canvas.remove(o)); canvas.renderAll(); e.preventDefault(); }
+  }
+});
+
+/* ==================== 水印 ==================== */
+function addWm(obj){ wmObjects.push(obj); canvas.add(obj); }
+document.getElementById('btnApplyTextWm').onclick = () => {
+  const text = document.getElementById('wmText').value.trim();
+  if(!text){ alert('先填水印文字'); return; }
+  const W = canvas.getWidth(), H = canvas.getHeight();
+  const alpha = +document.getElementById('wmAlpha').value / 100;
+  const size = +document.getElementById('wmSize').value;
+  const rot = +document.getElementById('wmRotate').value;
+  const pos = document.getElementById('wmPos').value;
+  const base = { fill: '#333', opacity: alpha, fontSize: size, fontFamily: 'sans-serif', angle: rot };
+  if(pos === 'br'){
+    const t = new fabric.Text(text, { ...base, left: W - size*text.length*0.6, top: H - size*1.6 });
+    addWm(t);
+  } else if(pos === 'center'){
+    const t = new fabric.Text(text, { ...base, left: W/2, top: H/2, originX:'center' });
+    addWm(t);
+  } else {
+    const stepX = 300, stepY = 170;
+    for(let y = stepY/2; y < H; y += stepY){
+      for(let x = stepX/2; x < W; x += stepX){
+        const t = new fabric.Text(text, { ...base, left: x, top: y, originX:'center' });
+        addWm(t);
+      }
+    }
+  }
+  canvas.renderAll();
+};
+const wmImgInput = document.getElementById('wmImgInput');
+document.getElementById('btnWmImg').onclick = () => wmImgInput.click();
+wmImgInput.onchange = e => {
+  const f = e.target.files[0]; if(!f) return;
+  const r = new FileReader();
+  r.onload = ev => fabric.Image.fromURL(ev.target.result, img => {
+    const maxW = canvas.getWidth() * 0.3;
+    const scale = maxW / img.width;
+    img.set({ scaleX: scale, scaleY: scale, left: canvas.getWidth()/2, top: canvas.getHeight()/2, opacity: +document.getElementById('wmImgAlpha').value/100, originX:'center', originY:'center' });
+    addWm(img); canvas.renderAll();
+  });
+  r.readAsDataURL(f);
+};
+document.getElementById('wmImgAlpha').oninput = e => {
+  document.getElementById('wmImgAlphaV').textContent = e.target.value + '%';
+  const last = wmObjects[wmObjects.length-1];
+  if(last && last.type === 'image'){ last.opacity = e.target.value/100; canvas.renderAll(); }
+};
+document.getElementById('btnRemoveWm').onclick = () => {
+  wmObjects.forEach(o => canvas.remove(o));
+  wmObjects = []; canvas.renderAll();
+};
+
+/* ==================== 导出 WebP（极致压缩） ==================== */
+const autoSize = document.getElementById('autoSize');
+const targetRow = document.getElementById('targetRow');
+const qualityRow = document.getElementById('qualityRow');
+autoSize.onchange = () => {
+  targetRow.hidden = !autoSize.checked;
+  qualityRow.hidden = autoSize.checked;
+};
+document.getElementById('quality').oninput = e =>
+  document.getElementById('qualityV').textContent = e.target.value;
+
+function toBlob(c, q){
+  return new Promise(res => c.toBlob(res, 'image/webp', q));
+}
+document.getElementById('btnExport').onclick = async () => {
+  if(!bgImage){ alert('先加载一张图片'); return; }
+  canvas.discardActiveObject();
+  canvas.renderAll();
+  // 内部画布始终是原图真实像素，直接导出 = 不模糊
+  const src = canvas.lowerCanvasEl;
+  let blob, hitFloor = false;
+  if(autoSize.checked){
+    const target = (+document.getElementById('targetKB').value || 500) * 1024;
+    let lo = 0.5, hi = 0.95, best = null;
+    for(let i=0;i<14;i++){
+      const q = (lo+hi)/2;
+      const b = await toBlob(src, q);
+      if(b.size <= target){ best = {q, blob:b}; lo = q; } else { hi = q; }
+    }
+    if(!best){ blob = await toBlob(src, 0.5); hitFloor = true; }
+    else blob = best.blob;
+  } else {
+    blob = await toBlob(src, +document.getElementById('quality').value/100);
+  }
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'shot-' + Date.now() + '.webp';
+  a.click();
+  const kb = blob.size/1024;
+  const ratio = origBytes ? (blob.size/origBytes*100).toFixed(1) : '—';
+  document.getElementById('result').textContent =
+    kb.toFixed(1) + ' KB（为原图 ' + ratio + '%）' + (hitFloor ? '，已到最低质量仍超目标' : '');
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+};
+</script>
+</body>
+</html>
