@@ -49,6 +49,8 @@
   .val{flex:0 0 52px;text-align:right;font-variant-numeric:tabular-nums;color:var(--muted)}
   .check{display:flex;align-items:center;gap:8px;font-size:14px;margin:8px 0;cursor:pointer}
   .hint{font-size:12px;color:var(--muted);line-height:1.6;margin-top:4px}
+  #toast{position:fixed;left:50%;top:24px;transform:translateX(-50%);background:rgba(34,48,60,.93);color:#fff;padding:10px 18px;border-radius:10px;font-size:14px;z-index:99;opacity:0;transition:.25s;pointer-events:none;max-width:90%}
+  #toast.show{opacity:1}
   .panel-box{border:1px solid var(--line);border-radius:10px;padding:10px;margin-top:6px}
   /* 我的截图相册 */
   .shot-list{display:flex;flex-direction:column;gap:10px;margin-top:6px}
@@ -70,13 +72,13 @@
 <header>
   <h1>WebP <span>Shot</span></h1>
   <button class="btn" id="btnUpload">📁 上传图片</button>
-  <button class="btn" id="btnPaste">📋 粘贴截图</button>
+  <button class="btn" id="btnPaste">📋 粘贴（按 Cmd+V）</button>
   <button class="btn" id="btnClear">🗑 清空</button>
   <div class="spacer"></div>
   <button class="btn" id="btnUndo">↩ 撤销</button>
   <button class="btn" id="btnRedo">↪ 重做</button>
-  <button class="btn" id="btnSave">💾 保存到网站</button>
-  <button class="btn primary" id="btnExport">⬇ 下载 WebP</button>
+  <button class="btn primary" id="btnSave">💾 保存到网站</button>
+  <button class="btn" id="btnExport">⬇ 下载 WebP</button>
   <input type="file" id="fileInput" accept="image/*" hidden>
 </header>
 
@@ -93,14 +95,16 @@
     <button class="tool" data-tool="pencil" title="画笔">✏️</button>
     <button class="tool" data-tool="text" title="文字">T</button>
     <div class="divider"></div>
+    <button class="tool" id="btnFront" title="置顶（选中对象移到最上层）">⬆</button>
+    <button class="tool" id="btnBack" title="置底（选中对象移到最下层）">⬇</button>
     <button class="tool" id="btnDel" title="删除选中">🗑</button>
   </div>
 
   <!-- 画布区 -->
   <div class="stage" id="stage">
     <div class="empty-hint" id="hint">
-      Mac 截图按 <b>Cmd + Ctrl + Shift + 4</b>（带 Control，不存桌面）框选，图进剪贴板；在本页按 <b>Cmd + V</b> 即自动存入右侧相册。也可拖拽 / 点上传。<br>
-      图存在「我的截图」，不下载到电脑；要标注水印的成品再点「保存到网站」。
+      把截图复制后，在本页按 <b>Ctrl + V</b>（Mac 为 Cmd + V），图片会<b>直接显示在中间画布</b>供标注；也可拖拽或点「上传图片」。<br>
+      原图默认自动存进右侧「我的截图」（不下载到电脑）；标注加水印后的成品再点「保存到网站」。
     </div>
     <div class="canvas-wrap" id="wrap" hidden>
       <canvas id="canvas" width="800" height="600"></canvas>
@@ -156,7 +160,7 @@
 <footer>
   <span>原图：<b id="origInfo">未加载</b></span>
   <span>导出：<b id="result">—</b></span>
-  <span style="margin-left:auto">纯前端本地处理，图片不上传服务器</span>
+  <span style="margin-left:auto">v4 · 粘贴直显 · 图层置顶/置底 · 纯前端本地处理，不上传服务器</span>
 </footer>
 
 <script>/* ==================== 基础 ==================== */
@@ -213,12 +217,20 @@ function applyBgImage(img, w, h, bytes){
   history.push(JSON.stringify(canvas.toJSON(['type'])));
   document.getElementById('origInfo').textContent = origDims + ' · ' + (origBytes/1024).toFixed(1) + ' KB';
 }
+function isImgFile(file){
+  if(!file) return false;
+  if(file.type && file.type.startsWith('image/')) return true;
+  const name = (file.name || '').toLowerCase();
+  return /\.(png|jpe?g|webp|gif|bmp|svg|jpg)$/.test(name);
+}
 function loadImageFile(file){
-  if(!file || !file.type.startsWith('image/')) return;
-  const r = new FileReader();
-  r.onload = e => fabric.Image.fromURL(e.target.result, img =>
-    applyBgImage(img, Math.round(img.width), Math.round(img.height), file.size));
-  r.readAsDataURL(file);
+  if(!isImgFile(file)){ showTip('剪贴板里不是图片，请改用「上传图片」选图片文件'); return; }
+  const url = URL.createObjectURL(file);
+  fabric.Image.fromURL(url, img => {
+    if(!img || !img.width){ showTip('图片读取失败，请改用「上传图片」'); URL.revokeObjectURL(url); return; }
+    applyBgImage(img, Math.round(img.width), Math.round(img.height), file.size);
+    setTimeout(() => URL.revokeObjectURL(url), 3000);
+  }, { crossOrigin: 'anonymous' });
   autoStoreFile(file);
 }
 function fitView(){
@@ -231,22 +243,36 @@ function fitView(){
 window.addEventListener('resize', fitView);
 
 /* 上传 / 拖拽 / 粘贴 */
+function showTip(msg){
+  let t = document.getElementById('toast');
+  if(!t){ t = document.createElement('div'); t.id = 'toast'; document.body.append(t); }
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 2800);
+}
 const fileInput = document.getElementById('fileInput');
 document.getElementById('btnUpload').onclick = () => fileInput.click();
 fileInput.onchange = e => loadImageFile(e.target.files[0]);
 document.getElementById('btnPaste').onclick = async () => {
-  try{
-    const items = await navigator.clipboard.read();
-    for(const it of items){
-      const t = it.types.find(x => x.startsWith('image/'));
-      if(t){ loadImageFile(new File([await it.getType(t)], 'paste.png', {type:t})); return; }
-    }
-    alert('剪贴板里没有图片。Mac 请按 Cmd+Ctrl+Shift+4 框选截图，再 Cmd+V');
-  }catch{ alert('请直接在页面按 Ctrl/Cmd+V 粘贴'); }
+  document.body.focus();
+  if(navigator.clipboard && navigator.clipboard.read){
+    try{
+      const items = await navigator.clipboard.read();
+      for(const it of items){
+        const type = it.types.find(t => t.startsWith('image/'));
+        if(type){ const blob = await it.getType(type); loadImageFile(blob); return; }
+      }
+    }catch(err){ /* 浏览器拒绝读取，走键盘粘贴 */ }
+  }
+  showTip('请现在按键盘 Ctrl + V（Mac 为 Cmd + V）把截图粘进来');
 };
 window.addEventListener('paste', e => {
-  const f = e.clipboardData && e.clipboardData.files && e.clipboardData.files[0];
-  if(f) loadImageFile(f);
+  const cd = e.clipboardData;
+  if(!cd) return;
+  let f = null;
+  if(cd.files && cd.files.length){ for(const fl of cd.files){ if(isImgFile(fl)){ f = fl; break; } } }
+  if(!f && cd.items){ for(const it of cd.items){ if(it.kind === 'file' || (it.type && it.type.startsWith('image/'))){ const g = it.getAsFile(); if(isImgFile(g)){ f = g; break; } } } }
+  if(f){ e.preventDefault(); loadImageFile(f); }
+  else showTip('剪贴板里没有图片：截图后先复制，或直接点「上传图片」');
 });
 stage.addEventListener('dragover', e => e.preventDefault());
 stage.addEventListener('drop', e => {
@@ -325,6 +351,16 @@ canvas.on('mouse:up', () => { if(drew){ canvas.add(drew); drew = null; } });
 document.getElementById('btnDel').onclick = () => {
   canvas.getActiveObjects().forEach(o => canvas.remove(o));
   canvas.discardActiveObject(); canvas.renderAll();
+};
+document.getElementById('btnFront').onclick = () => {
+  const o = canvas.getActiveObject();
+  if(!o){ showTip('先用 🖐 选中要置顶的标注'); return; }
+  canvas.bringToFront(o); canvas.renderAll();
+};
+document.getElementById('btnBack').onclick = () => {
+  const o = canvas.getActiveObject();
+  if(!o){ showTip('先用 🖐 选中要置底的标注'); return; }
+  canvas.sendToBack(o); canvas.renderAll();
 };
 window.addEventListener('keydown', e => {
   if((e.key === 'Delete' || e.key === 'Backspace') && document.activeElement.tagName !== 'INPUT'){
@@ -444,6 +480,7 @@ async function renderShots(){
     const url = URL.createObjectURL(r.blob);
     const item = document.createElement('div'); item.className = 'shot-item';
     const img = document.createElement('img'); img.src = url; img.title = '点击载入查看';
+    img.onerror = () => { img.style.opacity = '.35'; img.alt = '预览不可用'; };
     img.onclick = () => fabric.Image.fromURL(url, im => applyBgImage(im, im.width, im.height, 0));
     const meta = document.createElement('div'); meta.className = 'shot-meta';
     meta.innerHTML = '#' + r.id + ' · ' + new Date(r.time).toLocaleString() + '<br>' + (r.blob.size/1024).toFixed(1) + ' KB';
@@ -457,6 +494,8 @@ async function renderShots(){
 }
 document.getElementById('btnSave').onclick = async () => {
   try{
+    const d = await dbReady;
+    if(!d){ alert('本地存储不可用（直接双击 file:// 文件常被限制），请用部署的 https 网址打开。'); return; }
     const { blob, hitFloor } = await compressCurrent();
     await dbAdd({ blob, time: Date.now(), size: blob.size });
     await renderShots();
@@ -466,17 +505,19 @@ document.getElementById('btnSave').onclick = async () => {
   }catch(err){ if(err.message !== 'no image') alert(err.message); }
 };
 const dbReady = openDB().then(d => { db = d; renderShots(); return d; })
-  .catch(() => { shotList.innerHTML = '<div class="hint">当前浏览器不支持本地存储。</div>'; return null; });
+  .catch(() => { shotList.innerHTML = '<div class="hint">当前环境本地存储不可用（直接双击本地文件常被限制），请用 https 网址打开。</div>'; return null; });
 async function autoStoreFile(file){
-  const d = await dbReady; if(!d) return;
+  const d = await dbReady;
+  if(!d){ showTip('本地存储不可用，请用部署的 https 网址打开本页面'); return; }
   if(!document.getElementById('autoSave').checked) return;
-  await dbAdd({ blob: file, time: Date.now(), size: file.size });
-  renderShots();
-  document.getElementById('result').textContent = '已自动存入网页相册 · ' + (file.size/1024).toFixed(1) + ' KB';
+  try{
+    await dbAdd({ blob: file, time: Date.now(), size: file.size });
+    renderShots();
+    document.getElementById('result').textContent = '已自动存入网页相册 · ' + (file.size/1024).toFixed(1) + ' KB';
+  }catch(err){ showTip('存入相册失败：' + (err.message || err)); }
 }
 
 
 </script>
 </body>
 </html>
-<!-- （注：内容由AI生成） -->
