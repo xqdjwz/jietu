@@ -71,14 +71,15 @@
 
 <header>
   <h1>WebP <span>Shot</span></h1>
+  <button class="btn primary" id="btnCapture">📷 网页截屏（不存桌面）</button>
   <button class="btn" id="btnUpload">📁 上传图片</button>
   <button class="btn" id="btnPaste">📋 粘贴（按 Cmd+V）</button>
   <button class="btn" id="btnClear">🗑 清空</button>
   <div class="spacer"></div>
   <button class="btn" id="btnUndo">↩ 撤销</button>
   <button class="btn" id="btnRedo">↪ 重做</button>
-  <button class="btn primary" id="btnSave">💾 保存到网站</button>
-  <button class="btn" id="btnExport">⬇ 下载 WebP</button>
+  <button class="btn" id="btnSave">🗂 存进相册（可选）</button>
+  <button class="btn" id="btnExport">⬇ 下载 WebP（成品）</button>
   <input type="file" id="fileInput" accept="image/*" hidden>
 </header>
 
@@ -103,8 +104,8 @@
   <!-- 画布区 -->
   <div class="stage" id="stage">
     <div class="empty-hint" id="hint">
-      把截图复制后，在本页按 <b>Ctrl + V</b>（Mac 为 Cmd + V），图片会<b>直接显示在中间画布</b>供标注；也可拖拽或点「上传图片」。<br>
-      原图默认自动存进右侧「我的截图」（不下载到电脑）；标注加水印后的成品再点「保存到网站」。
+      点「📷 网页截屏」选屏幕 / 窗口，画面直接进中间画布，<b>不落桌面、不进剪贴板</b>；也可粘贴（Ctrl+V / Mac Cmd+V）或上传。<br>
+      在中间标注、加水印，全部满意后<b>只点一次「⬇ 下载 WebP」</b>存成品，中间过程不会重复保存。
     </div>
     <div class="canvas-wrap" id="wrap" hidden>
       <canvas id="canvas" width="800" height="600"></canvas>
@@ -152,15 +153,15 @@
     </div>
 
     <h2>我的截图（存在本浏览器）</h2>
-    <label class="check"><input type="checkbox" id="autoSave" checked> 粘贴 / 拖入 / 上传后自动存入相册</label>
-    <div id="shotList" class="shot-list"><div class="hint">点「保存到网站」后缩略图显示在这里，不会下载到电脑。</div></div>
+    <label class="check"><input type="checkbox" id="autoSave"> 原图自动存入网页相册（默认关闭，避免重复保存；需要留存再勾）</label>
+    <div id="shotList" class="shot-list"><div class="hint">这里是浏览器本地相册，可选留存；不点就不会保存，成品直接「下载 WebP」即可。</div></div>
   </div>
 </div>
 
 <footer>
   <span>原图：<b id="origInfo">未加载</b></span>
   <span>导出：<b id="result">—</b></span>
-  <span style="margin-left:auto">v5 · 原生加载防读取失败 · 图层置顶/置底 · 纯前端本地处理，不上传服务器</span>
+  <span style="margin-left:auto">v6 · 网页截屏直进画布 · 只下载一次成品 · 纯前端本地处理，不上传服务器</span>
 </footer>
 
 <script>/* ==================== 基础 ==================== */
@@ -257,6 +258,43 @@ function showTip(msg){
 const fileInput = document.getElementById('fileInput');
 document.getElementById('btnUpload').onclick = () => fileInput.click();
 fileInput.onchange = e => loadImageFile(e.target.files[0]);
+
+/* 网页内截屏：getDisplayMedia 抓一帧直接进画布，不落桌面、不进剪贴板 */
+document.getElementById('btnCapture').onclick = async () => {
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia){
+    showTip('当前浏览器不支持网页截屏，请用「粘贴」或「上传图片」'); return;
+  }
+  let stream;
+  try{
+    stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: false });
+  }catch(err){ showTip('已取消选择屏幕，或浏览器未授权'); return; }
+  const video = document.createElement('video');
+  video.srcObject = stream; video.muted = true; video.playsInline = true;
+  const stop = () => stream.getTracks().forEach(t => t.stop());
+  try{ await video.play(); }catch(e){}
+  await new Promise(res => {
+    if(video.videoWidth) return res();
+    video.onloadedmetadata = () => res();
+    setTimeout(res, 2500);
+  });
+  if(!video.videoWidth){ stop(); showTip('没取到画面，请重试'); return; }
+  const c = document.createElement('canvas');
+  c.width = video.videoWidth; c.height = video.videoHeight;
+  c.getContext('2d').drawImage(video, 0, 0);
+  stop();
+  c.toBlob(blob => {
+    if(!blob){ showTip('截图失败，请重试'); return; }
+    const url = URL.createObjectURL(blob);
+    const im = new Image();
+    im.onload = () => {
+      applyBgImage(new fabric.Image(im, { crossOrigin: 'anonymous' }), im.width, im.height, blob.size);
+      setTimeout(() => URL.revokeObjectURL(url), 3000);
+      showTip('已抓到画面，直接在中间标注；满意后再点「下载 WebP」');
+    };
+    im.onerror = () => showTip('画面解码失败，请重试');
+    im.src = url;
+  }, 'image/png');
+};
 document.getElementById('btnPaste').onclick = async () => {
   document.body.focus();
   if(navigator.clipboard && navigator.clipboard.read){
@@ -505,8 +543,8 @@ document.getElementById('btnSave').onclick = async () => {
     await dbAdd({ blob, time: Date.now(), size: blob.size });
     await renderShots();
     const kb = blob.size/1024;
-    document.getElementById('result').textContent = '已保存到网站相册 · ' + kb.toFixed(1) + ' KB' + (hitFloor ? '（已到最低质量）' : '');
-    alert('已保存到网页相册，不会下载到电脑');
+    document.getElementById('result').textContent = '已存进本地相册 · ' + kb.toFixed(1) + ' KB' + (hitFloor ? '（已到最低质量）' : '');
+    alert('已存进浏览器本地相册（不会下载到电脑）；要成品请点「下载 WebP」');
   }catch(err){ if(err.message !== 'no image') alert(err.message); }
 };
 const dbReady = openDB().then(d => { db = d; renderShots(); return d; })
